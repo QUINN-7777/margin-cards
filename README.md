@@ -10,7 +10,7 @@ Select text in Reading view, write a note, and a card appears in the margin besi
 
 Obsidian → Settings → Community plugins → Browse → search **Margin Cards**.
 
-Requires Obsidian **1.7.2** or newer.
+Requires Obsidian **1.7.2** or newer, on **desktop** (Windows / macOS / Linux). Mobile is not supported and has not been tested.
 
 ## Language
 

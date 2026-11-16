@@ -1,0 +1,671 @@
+/* Margin Cards —— 批注版式
+   只在「本篇有批注」的阅读视图生效（插件给容器加 .omn-active），其它笔记完全不变。
+   设置 → Margin Cards 里「展示方式」决定排版骨架：页边（omn-margin，让出批注列、卡片常驻）
+   或浮签（omn-bubble，正文满宽、悬停才弹气泡）；「原文标记 / 卡片样式 / 引线」是三个独立开关，可任意搭配；
+   默认那套写在第二、三节，其它搭配在第五节覆盖。宽窄、圆角、分类颜色同上，
+   插件会把值写成一个动态 style 覆盖下面这几个默认值。 */
+
+.markdown-preview-view.omn-active {
+  --omn-text: 640px;   /* 正文列宽 */
+  --omn-card: 26%;      /* 批注卡片宽：占面板的比例，页边模式下插件会按实际宽度改成 px */
+  --omn-gap: 40px;     /* 正文与卡片之间的空隙 */
+  --omn-radius: 6px;   /* 卡片圆角 */
+  --omn-leader: dashed;/* 引线线型：dashed / solid / none */
+  --omn-line: var(--background-modifier-border);
+}
+
+/* 保险：万一 Obsidian 的正文不是直接子元素而是包了容器，至少卡片不会叠在文字上 */
+.markdown-preview-view.omn-active .omn-card { margin: 0 !important; }
+
+/* 一、展示方式＝页边：正文列、批注列、空隙三个宽度由插件按面板实际宽度现算，写成 --omn-* 挂在容器上
+   （以前这里直接拿设置里的写死值算，窗口一窄，正文那条 max(240px) 保底就和两条批注列叠在一起，
+     卡片直接压在文字上。现在 sizer 永远满宽，正文只占算剩下的那份，物理上叠不到一起。）
+   .markdown-preview-sizer 写两遍是为了压过 Minimal 主题的 width:100% / max-width:88% */
+.markdown-preview-view.omn-active.omn-margin .markdown-preview-sizer.markdown-preview-sizer {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  margin-inline: auto !important;
+}
+.markdown-preview-view.omn-active.omn-margin .markdown-preview-sizer.markdown-preview-sizer > :is(div, p, ul, ol, dl, blockquote, pre, table, h1, h2, h3, h4, h5, h6) {
+  width: var(--omn-text);
+  max-width: 100%;
+  box-sizing: border-box; /* 不靠主题的全局设置，列表的默认 padding 不能把正文列撑宽 */
+  margin-inline: 0 !important;
+}
+
+/* 一.1、批注列换边（设置里的「批注位置」，插件给容器加 .omn-side-right / left / both）
+   这里只挪正文，批注列的位置由插件算；面板太窄时插件会把双边降成单边，类名也跟着改 */
+.markdown-preview-view.omn-active.omn-margin.omn-side-right:not(.omn-centered) .markdown-preview-sizer.markdown-preview-sizer > :is(div, p, ul, ol, dl, blockquote, pre, table, h1, h2, h3, h4, h5, h6) {
+  margin-left: var(--omn-edge, 0px) !important;
+  margin-right: auto !important;
+}
+.markdown-preview-view.omn-active.omn-margin.omn-side-left:not(.omn-centered) .markdown-preview-sizer.markdown-preview-sizer > :is(div, p, ul, ol, dl, blockquote, pre, table, h1, h2, h3, h4, h5, h6) {
+  margin-left: auto !important;
+  margin-right: var(--omn-edge, 0px) !important;
+}
+.markdown-preview-view.omn-active.omn-margin.omn-side-both .markdown-preview-sizer.markdown-preview-sizer > :is(div, p, ul, ol, dl, blockquote, pre, table, h1, h2, h3, h4, h5, h6) {
+  margin-inline: auto !important;
+}
+/* 单边但面板够宽：插件加 .omn-centered，对面空一条同宽的假列，正文摆正中，
+   卡片紧贴正文右缘（以前正文死贴窗口左边、卡片死贴右边，中间空出一大片） */
+.markdown-preview-view.omn-active.omn-margin.omn-centered .markdown-preview-sizer.markdown-preview-sizer > :is(div, p, ul, ol, dl, blockquote, pre, table, h1, h2, h3, h4, h5, h6) {
+  margin-inline: auto !important;
+}
+
+/* 一.2、展示方式＝浮签：正文满宽，卡片平时不出现，鼠标停在原文色块上才弹气泡
+   （气泡复用页边那张卡片元素，所以外观跟着「卡片样式」走，只是改成浮在正文上） */
+.markdown-preview-view.omn-active.omn-bubble .omn-layer > .omn-card { display: none; }
+.markdown-preview-view.omn-active.omn-bubble .omn-layer > .omn-card.omn-open {
+  display: block;
+  z-index: 3;
+  /* 长批注、带图的批注不能顶出屏幕，超出就在气泡里滚 */
+  max-height: min(460px, 70vh);
+  overflow-y: auto;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.20);
+  cursor: default;
+}
+/* 浮签的气泡贴着原文，不画页边那条引线；无边框类样式的气泡靠阴影分界 */
+.markdown-preview-view.omn-active.omn-bubble .omn-layer > .omn-card::before { content: none; }
+/* 浅底和色块的分类色都是半透明的，气泡底下压着正文，不垫一层不透明纸色正文会透上来；
+   页边模式不用垫，卡片底下本来就是纸色。皮肤本身（无边框、实心色）照搬页边，不改 */
+.markdown-preview-view.omn-active.omn-bubble .omn-layer.omn-cs-tint > .omn-card.omn-open {
+  background-color: var(--background-primary);
+  background-image: linear-gradient(var(--omn-hl), var(--omn-hl));
+}
+.markdown-preview-view.omn-active.omn-bubble .omn-layer.omn-cs-fill > .omn-card.omn-open {
+  background-color: var(--background-primary);
+  background-image: linear-gradient(var(--omn-fill), var(--omn-fill));
+}
+/* 色块是浮签模式的触发器，得接得住鼠标（页边模式下它是纯装饰，不拦点击） */
+.markdown-preview-view.omn-active.omn-bubble .omn-layer > .omn-hl > .omn-hl-line {
+  pointer-events: auto;
+  cursor: help;
+}
+/* 鼠标停住的那一处色块加一点重量，让人知道气泡是它喊出来的 */
+.markdown-preview-view.omn-active.omn-bubble .omn-hl.omn-hl-on > .omn-hl-line {
+  background: var(--omn-hl-strong);
+  border-radius: 3px;
+}
+
+/* 二、覆盖层：卡片、高亮、引线全画在这里面，Obsidian 的正文容器里一个节点都不加
+   （之前卡片插在 .markdown-preview-sizer 里，Obsidian 重排正文时会把它抹掉，
+     插件的观察器再补回去 —— 两边互相抹，正文就以每秒几次的频率闪） */
+.markdown-preview-view.omn-active { position: relative; }
+.omn-layer {
+  position: absolute;
+  pointer-events: none;
+  z-index: 1;
+}
+.markdown-preview-view.omn-active .omn-layer > .omn-card {
+  position: absolute;
+  width: var(--omn-card);
+  margin: 0 !important;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--omn-line);
+  border-left: 3px solid var(--omn-accent);
+  border-radius: var(--omn-radius, 6px);
+  background: var(--background-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: text;
+  pointer-events: auto;
+}
+/* 引线：卡片左边一小段虚线，够指出「往左看」就行，不拉长线穿过正文 */
+.markdown-preview-view.omn-active .omn-layer > .omn-card::before {
+  content: '';
+  position: absolute;
+  right: 100%;
+  top: 13px;
+  width: 26px;
+  border-top: 1px var(--omn-leader, dashed) var(--omn-accent);
+  opacity: 0.55;
+}
+/* 批注排在左边那一列时，引线从卡片右边伸出去指正文（插件给这类卡片加 .omn-flip） */
+.markdown-preview-view.omn-active .omn-layer > .omn-card.omn-flip::before {
+  right: auto;
+  left: 100%;
+}
+.omn-card .omn-cat {
+  color: var(--omn-accent);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+/* 被批注的原文复述在卡片最上面，光看短线认不出指哪句 */
+.omn-card .omn-quote {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  padding-left: 6px;
+  border-left: 2px solid var(--omn-accent);
+  margin-bottom: 6px;
+}
+/* 二.1、卡片正文里的富文本：[[笔记链接]]、![[图片]]、[文字](网址) 都在这渲染
+   卡片不在 .markdown-preview-view 的排版作用域里，主题的链接/图片样式够不着，
+   所以这里显式写一套；页边卡、浮签气泡、侧边栏面板条目共用（面板条目也带 .omn-body）。
+   宽窄一律以容器为准，图不能把容器撑破。 */
+:is(.omn-card, .omn-bw-item) .omn-body > :first-child { margin-top: 0; }
+:is(.omn-card, .omn-bw-item) .omn-body > :last-child { margin-bottom: 0; }
+:is(.omn-card, .omn-bw-item) .omn-body p,
+:is(.omn-card, .omn-bw-item) .omn-body ul,
+:is(.omn-card, .omn-bw-item) .omn-body ol { font-size: 13px; }
+
+:is(.omn-card, .omn-bw-item) .omn-body { overflow-wrap: anywhere; } /* 一长串网址不能把卡片顶宽 */
+:is(.omn-card, .omn-bw-item) .omn-body :is(a, .internal-link) {
+  color: var(--link-color, var(--interactive-accent));
+  cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 2px;
+}
+:is(.omn-card, .omn-bw-item) .omn-body :is(a, .internal-link):hover { color: var(--link-hover-color, var(--interactive-accent-hover)); }
+:is(.omn-card, .omn-bw-item) .omn-body a.internal-link.is-unresolved { color: var(--link-unresolved-color, var(--text-muted)); opacity: 0.75; }
+/* 图片：按容器宽度缩放，点开还是 Obsidian 自己的预览 */
+:is(.omn-card, .omn-bw-item) .omn-body :is(img, .internal-embed, .external-embed) { max-width: 100%; }
+:is(.omn-card, .omn-bw-item) .omn-body img {
+  display: block;
+  height: auto;
+  margin: 6px 0;
+  border-radius: 4px;
+  cursor: zoom-in;
+}
+:is(.omn-card, .omn-bw-item) .omn-body .internal-embed.image-embed { display: block; margin: 6px 0; }
+/* 行内 ``code`` 只把写死的 12px 改成跟正文一致，底色胶囊维持原样 */
+:is(.omn-card, .omn-bw-item) .omn-body :is(code, pre) {
+  font-family: var(--font-monospace, monospace);
+  font-size: inherit;
+  background: var(--background-secondary);
+  border-radius: 3px;
+}
+:is(.omn-card, .omn-bw-item) .omn-body code { padding: 1px 4px; }
+:is(.omn-card, .omn-bw-item) .omn-body pre { padding: 6px 8px; margin: 6px 0; overflow-x: auto; white-space: pre-wrap; }
+:is(.omn-card, .omn-bw-item) .omn-body blockquote {
+  margin: 6px 0;
+  padding: 2px 0 2px 8px;
+  border-left: 2px solid var(--omn-accent);
+  color: var(--text-muted);
+}
+:is(.omn-card, .omn-bw-item) .omn-body :is(ul, ol) { padding-left: 18px; margin: 4px 0; }
+:is(.omn-card, .omn-bw-item) .omn-body li { margin: 2px 0; }
+:is(.omn-card, .omn-bw-item) .omn-body h1, :is(.omn-card, .omn-bw-item) .omn-body h2,
+:is(.omn-card, .omn-bw-item) .omn-body h3, :is(.omn-card, .omn-bw-item) .omn-body h4 {
+  font-size: 13px;
+  margin: 8px 0 4px;
+}
+:is(.omn-card, .omn-bw-item) .omn-body table { font-size: 12px; border-collapse: collapse; margin: 6px 0; }
+:is(.omn-card, .omn-bw-item) .omn-body :is(th, td) { border: 1px solid var(--omn-line); padding: 2px 6px; }
+:is(.omn-card, .omn-bw-item) .omn-body hr { border: none; border-top: 1px solid var(--omn-line); margin: 8px 0; }
+:is(.omn-card, .omn-bw-item) .omn-body .callout { font-size: 12.5px; margin: 6px 0; padding: 6px 8px; }
+
+/* 三、原文高亮：覆盖层里按实测行矩形铺的半透明色块，底色淡、下面压一条分类色的线 */
+.omn-layer > .omn-hl {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.omn-hl > .omn-hl-line {
+  position: absolute;
+  box-sizing: border-box;
+  background: var(--omn-hl);
+  border-bottom: 2px solid var(--omn-accent);
+}
+
+/* 3.1 从面板跳过来时的定位闪烁：另起一个临时层，1.5 秒后自己消失，五种样式都认 */
+/* 定位高亮：点面板一行跳过来时，用一套和分类无关的显眼颜色，停 3 秒左右 */
+.omn-flashlayer {
+  --omn-locate: rgba(255, 212, 60, 0.55);
+  --omn-locate-line: #e8a20c;
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+}
+.omn-flashlayer > .omn-flash {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 3px;
+  border: 2px solid var(--omn-locate-line);
+  background: var(--omn-locate);
+  box-shadow: 0 0 0 4px rgba(255, 212, 60, 0.22), 0 0 14px rgba(255, 212, 60, 0.45);
+  opacity: 0;
+  animation: omn-flash 3.2s ease-out 1;
+}
+@keyframes omn-flash {
+  0% { opacity: 0; }
+  7% { opacity: 1; }
+  26% { opacity: 0.72; }
+  45% { opacity: 1; }
+  64% { opacity: 0.72; }
+  82% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.omn-card.omn-flash-card {
+  animation: omn-flash-card 3.2s ease-out 1;
+}
+@keyframes omn-flash-card {
+  0%, 100% { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07); }
+  7%, 45%, 82% { box-shadow: 0 0 0 3px #e8a20c, 0 0 14px rgba(255, 212, 60, 0.5); }
+}
+
+/* 3.2 笔记开在编辑器里（Live Preview / 源码）时的定位闪烁：不切阅读视图，直接闪正文那一行 */
+.cm-line.omn-flash-line {
+  animation: omn-flash-line 3.2s ease-out 1;
+}
+@keyframes omn-flash-line {
+  0%, 100% { background-color: transparent; }
+  7%, 45%, 82% { background-color: rgba(255, 212, 60, 0.55); }
+}
+
+/* 四、分类配色（同名分类永远同色，插件按分类名取模） */
+.omn-c0 { --omn-accent: #495057; --omn-hl: rgba(73, 80, 87, 0.10); --omn-hl-strong: rgba(73, 80, 87, 0.30); --omn-fill: rgba(73, 80, 87, 0.18); }
+.omn-c1 { --omn-accent: #d1493f; --omn-hl: rgba(209, 73, 63, 0.13); --omn-hl-strong: rgba(209, 73, 63, 0.30); --omn-fill: rgba(209, 73, 63, 0.18); }
+.omn-c2 { --omn-accent: #d98324; --omn-hl: rgba(217, 131, 36, 0.16); --omn-hl-strong: rgba(217, 131, 36, 0.32); --omn-fill: rgba(217, 131, 36, 0.18); }
+.omn-c3 { --omn-accent: #2f9e44; --omn-hl: rgba(47, 158, 68, 0.13); --omn-hl-strong: rgba(47, 158, 68, 0.30); --omn-fill: rgba(47, 158, 68, 0.18); }
+.omn-c4 { --omn-accent: #0c8599; --omn-hl: rgba(12, 133, 153, 0.13); --omn-hl-strong: rgba(12, 133, 153, 0.30); --omn-fill: rgba(12, 133, 153, 0.18); }
+.omn-c5 { --omn-accent: #3b6fd4; --omn-hl: rgba(59, 111, 212, 0.13); --omn-hl-strong: rgba(59, 111, 212, 0.30); --omn-fill: rgba(59, 111, 212, 0.18); }
+.omn-c6 { --omn-accent: #8b5cf6; --omn-hl: rgba(139, 92, 246, 0.13); --omn-hl-strong: rgba(139, 92, 246, 0.30); --omn-fill: rgba(139, 92, 246, 0.18); }
+.theme-dark .omn-c0 { --omn-accent: #adb5bd; }
+.theme-dark .omn-c1 { --omn-accent: #ff8787; }
+.theme-dark .omn-c2 { --omn-accent: #ffa94d; }
+.theme-dark .omn-c3 { --omn-accent: #69db7c; }
+.theme-dark .omn-c4 { --omn-accent: #3bc9db; }
+.theme-dark .omn-c5 { --omn-accent: #74a8ff; }
+.theme-dark .omn-c6 { --omn-accent: #b197fc; }
+
+/* 五、可自由搭配的皮肤
+   设置里「原文标记」「卡片样式」「引线」是三个独立开关，插件只往覆盖层上挂
+   omn-mk-* / omn-cs-* 两个类；不挂（= 默认那套）时用的就是上面第二、三节的底子。 */
+
+/* 5.1 原文标记：正文里那句话长什么样（都画在覆盖层的 .omn-hl-line 上，不动正文） */
+
+/* 涟漪：正文一点不上色，只在字形底下画一条分类色的波浪线（Word 校对那条的样子）。
+   波浪用一段 inline SVG 当 mask，线的颜色由 background-color 走 var(--omn-accent)，
+   所以每个分类还是自己的颜色；SVG 里的 w3.org 只是命名空间声明，不会联网取东西。 */
+.markdown-preview-view.omn-active .omn-layer.omn-mk-marker .omn-hl-line {
+  background: transparent;
+  border-bottom: none;
+}
+.markdown-preview-view.omn-active .omn-layer.omn-mk-marker .omn-hl-line::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  height: 4px;
+  background-color: var(--omn-accent);
+  --omn-wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='4' viewBox='0 0 8 4'%3E%3Cpath d='M0 2 C1 0.6 3 0.6 4 2 C5 3.4 7 3.4 8 2' fill='none' stroke='%23000' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
+  -webkit-mask-image: var(--omn-wave);
+  mask-image: var(--omn-wave);
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
+  -webkit-mask-size: 8px 4px;
+  mask-size: 8px 4px;
+}
+
+/* Word 审阅：只留一条虚线下划线，正文完全不上色 */
+.markdown-preview-view.omn-active .omn-layer.omn-mk-dash .omn-hl-line {
+  background: transparent;
+  border-bottom: 1px dashed var(--omn-accent);
+}
+
+/* 胶囊：比文字宽出一点点的圆药丸，边框走分类色 */
+.markdown-preview-view.omn-active .omn-layer.omn-mk-pill .omn-hl-line {
+  background: transparent;
+  border-bottom: none;
+}
+.markdown-preview-view.omn-active .omn-layer.omn-mk-pill .omn-hl-line::after {
+  content: '';
+  position: absolute;
+  inset: -2px -5px;
+  border: 1px solid var(--omn-accent);
+  border-radius: 999px;
+  background: var(--omn-hl);
+}
+
+/* 马克笔：笔下沿一道粗色带，带一点斜切 */
+.markdown-preview-view.omn-active .omn-layer.omn-mk-brush .omn-hl-line {
+  background: transparent;
+  border-bottom: none;
+}
+.markdown-preview-view.omn-active .omn-layer.omn-mk-brush .omn-hl-line::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  bottom: 0;
+  height: 60%;
+  background: var(--omn-hl-strong);
+  border-radius: 2px;
+  transform: skewX(-8deg);
+}
+
+/* 5.2 卡片皮肤：右边那张卡长什么样 */
+
+/* 无边淡底卡：去掉边框和阴影，用分类色的浅底 */
+.markdown-preview-view.omn-active .omn-layer.omn-cs-tint > .omn-card {
+  border: none;
+  background: var(--omn-hl);
+  box-shadow: none;
+}
+.markdown-preview-view.omn-active .omn-layer.omn-cs-tint .omn-card .omn-cat {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.markdown-preview-view.omn-active .omn-layer.omn-cs-tint .omn-card .omn-quote {
+  font-style: italic;
+  border-left: none;
+  padding-left: 0;
+}
+
+/* 素点卡：纸白卡一点色都不铺，分类只靠一个小色圆点 + 灰字 */
+.markdown-preview-view.omn-active .omn-layer.omn-cs-dot > .omn-card {
+  border: 1px solid var(--omn-line);
+  background: var(--background-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.markdown-preview-view.omn-active .omn-layer.omn-cs-dot .omn-card .omn-cat {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.markdown-preview-view.omn-active .omn-layer.omn-cs-dot .omn-card .omn-cat::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--omn-accent);
+  flex: 0 0 auto;
+}
+
+/* 实心色块卡：整张卡上分类色的底，分类名变成一个色块标签 */
+.markdown-preview-view.omn-active .omn-layer.omn-cs-fill > .omn-card {
+  border: none;
+  background: var(--omn-fill);
+  box-shadow: none;
+}
+.markdown-preview-view.omn-active .omn-layer.omn-cs-fill .omn-card .omn-cat {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--omn-accent);
+  color: var(--background-primary);
+  font-size: 11px;
+}
+
+/* 便签卡：暖黄纸 + 硬阴影 + 顶上一条胶带 */
+.markdown-preview-view.omn-active .omn-layer.omn-cs-note > .omn-card {
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  background: #fffbe6;
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.16);
+  padding-top: 15px;
+}
+.theme-dark .markdown-preview-view.omn-active .omn-layer.omn-cs-note > .omn-card {
+  background: rgba(242, 201, 76, 0.13);
+}
+.markdown-preview-view.omn-active .omn-layer.omn-cs-note > .omn-card::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: 14px;
+  width: 34px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--omn-accent);
+  opacity: 0.75;
+}
+
+/* 六、弹窗 */
+.omn-modal-anchor {
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border-left: 3px solid var(--interactive-accent);
+  padding: 6px 8px;
+  margin-bottom: 10px;
+  max-height: 5.5em;
+  overflow: auto;
+}
+.omn-modal-anchor-label { color: var(--text-faint); }
+.omn-modal-cats { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.omn-chip {
+  padding: 2px 10px;
+  border: 1px solid var(--omn-accent, var(--omn-line));
+  border-radius: 999px;
+  color: var(--omn-accent, inherit);
+  font-size: 12.5px;
+  line-height: 1.6;
+  cursor: pointer;
+  user-select: none;
+}
+.omn-chip.is-on {
+  background: var(--omn-accent);
+  color: var(--background-primary);
+  font-weight: 700;
+}
+.omn-set-note { color: var(--text-muted); font-size: 12.5px; margin: -6px 0 10px; }
+.omn-modal-body { width: 100%; min-height: 130px; resize: vertical; font-family: var(--font-text, inherit); }
+/* 插入按钮那一排：笔记链接 / 图片 / 网址，点了就往光标位置插一对括号 */
+.omn-modal-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.omn-tool {
+  padding: 2px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.omn-tool:hover {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.omn-modal-hint { color: var(--text-faint); font-size: 11.5px; line-height: 1.55; margin: 2px 0 4px; }
+.omn-modal-row { display: flex; gap: 8px; margin-top: 10px; }
+.omn-manage-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.omn-manage-info { flex: 1; min-width: 0; }
+.omn-manage-cat { font-weight: 700; font-size: 13px; }
+.omn-manage-anchor,
+.omn-manage-note { font-size: 12.5px; color: var(--text-muted); overflow-wrap: anywhere; }
+
+/* 七、选中文字后浮出来的按钮（挂在 body 上，不依赖笔记容器） */
+.omn-add-btn {
+  position: fixed;
+  z-index: 999;
+  padding: 3px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--interactive-accent);
+  background: var(--background-primary);
+  color: var(--interactive-accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+.omn-add-btn:hover { background: var(--interactive-accent); color: var(--text-on-accent); }
+
+/* 八、丝带按钮打开的批注面板（右侧栏） */
+.omn-bw {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0 !important;
+  overflow: hidden;
+}
+.omn-bw-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px 2px; }
+.omn-bw-title { font-weight: 700; font-size: 14px; }
+.omn-bw-count { color: var(--text-faint); font-size: 12px; margin-left: auto; white-space: nowrap; }
+.omn-bw-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 10px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.omn-bw-search { width: 100%; box-sizing: border-box; height: 27px; padding: 2px 8px; font-size: 12px; }
+.omn-bw-hint { color: var(--text-faint); font-size: 11.5px; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.omn-bw-tools .omn-modal-cats { margin: 0; gap: 5px; }
+.omn-bw-tools .omn-chip { padding: 2px 9px; font-size: 12.5px; line-height: 1.55; }
+.omn-bw-list { flex: 1 1 auto; overflow-y: auto; padding: 8px 9px 16px; }
+.omn-bw-item {
+  position: relative;
+  border: 1px solid var(--omn-line, var(--background-modifier-border));
+  border-left: 3px solid var(--omn-accent);
+  border-radius: var(--omn-radius, 6px);
+  padding: 6px 9px;
+  margin-bottom: 7px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  cursor: pointer;
+  background: var(--background-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+}
+.omn-bw-item:hover { background: var(--background-modifier-hover); }
+.omn-bw-top { display: flex; align-items: baseline; gap: 7px; margin-bottom: 2px; }
+.omn-bw-cat { color: var(--omn-accent); font-weight: 700; white-space: nowrap; }
+.omn-bw-note { color: var(--text-muted); flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.omn-bw-date { color: var(--text-faint); font-size: 11.5px; white-space: nowrap; }
+.omn-bw-anchor { color: var(--text-normal); }
+.omn-bw-body { color: var(--text-muted); margin-top: 2px; }
+/* 面板里的批注正文比页边卡片收一点：一屏能多看两条 */
+.omn-bw-item .omn-body :is(p, ul, ol) { font-size: 12.5px; line-height: 1.45; }
+.omn-bw-empty { color: var(--text-faint); padding: 18px 6px; text-align: center; font-size: 12.5px; }
+
+/* 八.0、定位不到的批注：面板多一栏筛选，条目挂红标签，那句原文划掉 —— 右键「重新选原文」挂回去 */
+.omn-chip.omn-lost-chip { --omn-accent: #d1493f; }
+.theme-dark .omn-chip.omn-lost-chip { --omn-accent: #ff8787; }
+.omn-bw-lost-tag {
+  color: #fff;
+  background: #d1493f;
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 11px;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+.theme-dark .omn-bw-lost-tag { background: #a4262c; }
+.omn-bw-item.omn-bw-lost { border-left-color: #d1493f; }
+.theme-dark .omn-bw-item.omn-bw-lost { border-left-color: #ff8787; }
+.omn-bw-lost .omn-bw-anchor { color: var(--text-faint); text-decoration: line-through; }
+
+/* 八.1、面板条目穿和页边卡片同一件衣服
+   插件把 omn-cs-* 也挂在面板根节点上，所以这里逐条抄第五节的卡片皮肤，
+   把选择器从 .omn-card 换成 .omn-bw-item；圆角、分类标签、胶带一个都不另起一套。
+   引线不抄 —— 面板里离正文太远，画了只会横穿一列。 */
+.omn-bw { --omn-line: var(--background-modifier-border); }
+
+.omn-bw.omn-cs-tint .omn-bw-item {
+  border: none;
+  background: var(--omn-hl);
+  box-shadow: none;
+}
+.omn-bw.omn-cs-tint .omn-bw-cat {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.omn-bw.omn-cs-tint .omn-bw-anchor { font-style: italic; }
+
+/* 素点：面板条目和页边卡片穿同一件衣服 */
+.omn-bw.omn-cs-dot .omn-bw-item {
+  border: 1px solid var(--omn-line);
+  background: var(--background-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.omn-bw.omn-cs-dot .omn-bw-cat {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.omn-bw.omn-cs-dot .omn-bw-cat::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--omn-accent);
+  flex: 0 0 auto;
+}
+
+.omn-bw.omn-cs-fill .omn-bw-item {
+  border: none;
+  background: var(--omn-fill);
+  box-shadow: none;
+}
+.omn-bw.omn-cs-fill .omn-bw-cat {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--omn-accent);
+  color: var(--background-primary);
+  font-size: 11px;
+}
+
+.omn-bw.omn-cs-note .omn-bw-item {
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  background: #fffbe6;
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.16);
+  padding-top: 15px;
+}
+.theme-dark .omn-bw.omn-cs-note .omn-bw-item { background: rgba(242, 201, 76, 0.13); }
+/* 抄过来的皮肤把 hover 那层底色盖掉了，用一点提亮把点击反馈补回来 */
+.omn-bw.omn-cs-tint .omn-bw-item:hover,
+.omn-bw.omn-cs-fill .omn-bw-item:hover,
+.omn-bw.omn-cs-note .omn-bw-item:hover { filter: brightness(0.96); }
+.theme-dark .omn-bw.omn-cs-tint .omn-bw-item:hover,
+.theme-dark .omn-bw.omn-cs-fill .omn-bw-item:hover,
+.theme-dark .omn-bw.omn-cs-note .omn-bw-item:hover { filter: brightness(1.3); }
+.omn-bw.omn-cs-note .omn-bw-item::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: 14px;
+  width: 34px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--omn-accent);
+  opacity: 0.75;
+}
+
+/* 八.2、面板按笔记分组（设置里那个开关，默认关）
+   组名一行可点开收起；分组时组名已经写了笔记，条目右侧那一栏笔记名重复，藏掉。 */
+.omn-bw-group { margin-bottom: 6px; }
+.omn-bw-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  margin-bottom: 4px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.omn-bw-group-head:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.omn-bw-group-caret::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+}
+.omn-bw-group-head.is-closed .omn-bw-group-caret::before { transform: rotate(-45deg); }
+.omn-bw-group-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.omn-bw-group-count { color: var(--text-faint); font-weight: 400; }
+.omn-bw-list.omn-bw-grouped .omn-bw-note { display: none; }
+.omn-bw-list.omn-bw-grouped .omn-bw-date { margin-left: auto; }

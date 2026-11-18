@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS = {
   cardStyle: 'side',
   marginSide: 'right',
   displayMode: 'margin',
+  blockMark: 'band',
   highlight: true,
   groupPanel: false,
   exportFile: '批注清单.md',
@@ -52,6 +53,11 @@ const MARK_STYLES = [
   ['dash', '疏影', 'Dashed'],
   ['pill', '落章', 'Pill'],
   ['brush', '横扫', 'Marker'],
+];
+// 整块批注在正文上留下的痕迹：色带＝块左边一条竖色条；淡底＝整块铺一层分类色的浅底
+const BLOCK_MARKS = [
+  ['band', '左侧色带', 'Left band'],
+  ['tint', '整块淡底', 'Whole-block tint'],
 ];
 const CARD_STYLES = [
   ['side', '题笺', 'Accent bar'],
@@ -170,6 +176,12 @@ function countOcc(text, target) {
   return n;
 }
 
+// 整块批注靠「这块开头的二十几个字」认块：anchor 里存的就是这几个字，既给人看也用来定位。
+// 块中间改了字照样挂得上，整块被删掉才挂不上。
+function blockFp(anchor) {
+  return norm(String(anchor || '')).text.slice(0, 22);
+}
+
 function unwrapMarks(root) {
   root.querySelectorAll('mark.omn-mark').forEach((m) => {
     const parent = m.parentNode;
@@ -206,8 +218,15 @@ class NoteModal extends Modal {
 
     if (o.anchor) {
       const box = contentEl.createDiv({ cls: 'omn-modal-anchor' });
-      box.createSpan({ text: L('原文：', 'Original: '), cls: 'omn-modal-anchor-label' });
+      box.createSpan({ text: o.isBlock ? L('这一块：', 'This block: ') : L('原文：', 'Original: '), cls: 'omn-modal-anchor-label' });
       box.createSpan({ text: o.anchor, cls: 'omn-modal-anchor-text' });
+    }
+    // 整块批注得说清楚挂的是什么：块中间改了字还挂得住，整块删掉才挂不住
+    if (o.isBlock) {
+      contentEl.createDiv({
+        cls: 'omn-modal-hint',
+        text: L('批注挂在整块上 —— 这一段、这一张表、这一张图都算一块。插件记这块开头那二十几个字来认它：块中间改了字还挂得住，整块被删掉才挂不住。', 'Attached to the whole block — one paragraph, one table, one image each count as a block. The plugin remembers this block\u2019s first ~20 characters to find it again: editing words inside still attaches, deleting the block does not.'),
+      });
     }
 
     // 分类改成点选标签；批注原有的分类不在清单里时补一个，免得一改就丢
@@ -368,9 +387,15 @@ class AnchorModal extends Modal {
     const { contentEl } = this;
     const r = this.r;
     contentEl.createEl('h3', { text: L('重新挂上这条批注', 'Re-attach this annotation'), cls: 'omn-modal-title' });
+    const blk = r.a.kind === 'block';
     const hint = contentEl.createDiv({
       cls: 'omn-modal-hint',
-      text: L('这篇「', 'The note "') + r.p + L('」里已经找不到原来那句了。回笔记里把新的那句选中、复制，再回来粘到框里。', '" no longer contains the original sentence. Go back to the note, select and copy the new wording, then paste it here.'),
+      text:
+        L('这篇「', 'The note "') +
+        r.p +
+        (blk
+          ? L('」里已经找不到原来那一段了。回笔记里把新的那一段（哪怕只选它开头一句）选中、复制，再回来粘到框里。', '" no longer contains that block. Go back to the note, select and copy the new wording — its first sentence is enough — then paste it here.')
+          : L('」里已经找不到原来那句了。回笔记里把新的那句选中、复制，再回来粘到框里。', '" no longer contains the original sentence. Go back to the note, select and copy the new wording, then paste it here.')),
     });
     // 查询代码块渲染出来的句子源码里没有，挂不上 —— 直接讲清楚，别让他白找
     this.plugin.plainInfo(r.p).then((info) => {
@@ -380,11 +405,11 @@ class AnchorModal extends Modal {
     });
     const old = contentEl.createDiv({ cls: 'omn-modal-anchor' });
     old.createSpan({ text: L('原来记的是：', 'Previously anchored to: '), cls: 'omn-modal-anchor-label' });
-    old.createSpan({ text: r.a.anchor || '', cls: 'omn-modal-anchor-text' });
+    old.createSpan({ text: r.a.anchor || (blk ? L('（这一块没有文字）', '(this block has no text)') : ''), cls: 'omn-modal-anchor-text' });
 
     const body = contentEl.createEl('textarea', {
       cls: 'omn-modal-body',
-      attr: { placeholder: L('新的原文，一两句就够', 'The new sentence — one or two lines is enough') },
+      attr: { placeholder: blk ? L('那一段开头的字，一两句就够', 'The first words of that block — one or two lines is enough') : L('新的原文，一两句就够', 'The new sentence — one or two lines is enough') },
     });
     body.value = r.a.anchor || '';
     const tip = contentEl.createDiv({ cls: 'omn-modal-hint' });
@@ -401,7 +426,7 @@ class AnchorModal extends Modal {
         tip.setText(L('还没填原文', 'Nothing entered yet'));
         return;
       }
-      const ok = await this.plugin.anchorOk(r.p, t);
+      const ok = blk ? await this.plugin.blockOk(r.p, t) : await this.plugin.anchorOk(r.p, t);
       if (mine !== seq) return;
       tip.setText(ok ? L('正文里有这句，可以挂上去', 'Found in the text — this will attach') : L('正文里没有这句 —— 直接从笔记里复制过来最稳', 'Not found in the text — copy the sentence straight from the note'));
       tip.toggleClass('omn-ok', ok);
@@ -417,12 +442,14 @@ class AnchorModal extends Modal {
         new Notice(L('先把新的原文填进来', 'Enter the new sentence first'));
         return;
       }
-      if (!(await this.plugin.anchorOk(r.p, t))) {
-        new Notice(L('这句在正文里找不到，先回笔记里复制那句原文', 'That sentence is not in the text — copy it from the note first'));
+      const found = blk ? await this.plugin.blockOk(r.p, t) : await this.plugin.anchorOk(r.p, t);
+      if (!found) {
+        new Notice(blk ? L('这几句在正文里找不到：先回笔记里把那一段的开头复制过来', 'Those words are not in the text — copy the start of that block from the note first') : L('这句在正文里找不到，先回笔记里复制那句原文', 'That sentence is not in the text — copy it from the note first'));
         return;
       }
       r.a.anchor = t;
       r.a.occ = 0; // 新贴的这句没量过选区，从第一次出现算起
+      delete r.a.span; // 手打的这句就是全部原文，别拿旧选区的长度往后画
       await this.plugin.upsert(r.p, r.a);
       this.plugin.renderPath(r.p);
       new Notice(L('重新挂上了', 'Re-attached'));
@@ -463,7 +490,7 @@ class ManageModal extends Modal {
     const items = this.plugin.data[file.path] || [];
     if (!items.length) {
       contentEl.createEl('p', {
-        text: L('还没有批注。切到阅读视图，选中一段文字，松手后点旁边冒出来的「批注」按钮。', 'No annotations yet. Switch to Reading view, select some text, then click the Annotate button that appears next to it.'),
+        text: L('还没有批注。切到阅读视图，选中一段文字，松手后点旁边冒出来的「批注」按钮；想批整段、整张表或整张图，把鼠标停上去点「批注这一块」。', 'No annotations yet. Switch to Reading view, select some text, then click the Annotate button that appears next to it. To mark a whole paragraph, table or image, hover it and click Annotate block.'),
       });
       return;
     }
@@ -472,7 +499,12 @@ class ManageModal extends Modal {
       const row = contentEl.createDiv({ cls: 'omn-manage-row' });
       const info = row.createDiv({ cls: 'omn-manage-info' });
       info.createDiv({ cls: 'omn-manage-cat', text: a.category || '批注' });
-      info.createDiv({ cls: 'omn-manage-anchor', text: L('原文：', 'Original: ') + a.anchor });
+      info.createDiv({
+        cls: 'omn-manage-anchor',
+        text:
+          (a.kind === 'block' ? L('整块：', 'Block: ') : L('原文：', 'Original: ')) +
+          ((a.anchor || '').trim() || (a.kind === 'block' ? L('（这一块没有文字）', '(this block has no text)') : '')),
+      });
       info.createDiv({ cls: 'omn-manage-note', text: a.note });
       row.createEl('button', { text: L('定位', 'Locate') }).addEventListener('click', () => {
         this.close();
@@ -595,6 +627,7 @@ class OmnSettingTab extends PluginSettingTab {
 
     pick(L('展示方式', 'Display mode'), L('页边＝卡片常驻在正文左右两侧；浮签＝正文满宽阅读，鼠标停在被批注的文字上才弹出气泡', 'Margin: cards sit permanently in the gutters. Bubble: full-width text, a bubble appears when you hover the annotated words'), 'displayMode', DISPLAYS);
     pick(L('原文标记', 'Text mark'), L('正文里被批注的那句话长什么样。淡墨＝淡底加实线、涟漪＝字底波浪下划线、疏影＝虚线下划线、落章＝胶囊标签、横扫＝马克笔粗线', 'How the annotated phrase looks in the text. Tint = pale fill with a rule, Wave = wavy underline, Dashed = dashed underline, Pill = capsule, Marker = highlighter sweep'), 'markStyle', MARK_STYLES);
+    pick(L('整块标记', 'Block mark'), L('整块批注在正文里留下的痕迹：左侧色带＝块左边一条竖色条，整块淡底＝整块铺一层分类色的浅底。只影响「批注这一块」加的批注，选字的批注仍按上面「原文标记」走。', 'How whole-block annotations look: Left band = a vertical bar beside the block, Whole-block tint = the whole block filled with a pale category color. Affects only annotations made with "Annotate block"; word annotations still follow the Text mark above.'), 'blockMark', BLOCK_MARKS);
     pick(L('卡片样式', 'Card skin'), L('批注卡长什么样。题笺＝色条白卡、晕纸＝无边淡底、素点＝纸白卡加小色点、敷色＝实心色块、贴黄＝便签', 'How the card looks. Accent bar = white card with a colored bar, Tinted = borderless pale fill, Dot = white card with a dot, Solid = filled block, Sticky note = note slip'), 'cardStyle', CARD_STYLES);
     pick(L('引线', 'Leader line'), L('卡片伸向正文的那条短线（浮签方式不画引线）', 'The short line from the card toward the text (not drawn in bubble mode)'), 'leader', LEADERS);
     pick(L('批注位置', 'Card side'), L('页边卡片飘在哪一侧；选「左右两边」时按原文顺序一条右、一条左交替排（只在页边方式下生效）', 'Which gutter the cards float in; "Both sides" alternates right and left in text order (margin mode only)'), 'marginSide', SIDES);
@@ -774,7 +807,9 @@ class OmnBrowserView extends ItemView {
     if (!shown.length) {
       this.listEl.createDiv({
         cls: 'omn-bw-empty',
-        text: all.length ? L('没有匹配的批注，换个词或点「全部」。', 'Nothing matches — try another word or click All.') : L('还没有批注：切到阅读视图，选中正文文字，松手后点旁边冒出的「批注」。', 'No annotations yet: switch to Reading view, select some text, then click the Annotate button that appears.'),
+        text: all.length
+          ? L('没有匹配的批注，换个词或点「全部」。', 'Nothing matches — try another word or click All.')
+          : L('还没有批注：切到阅读视图，选中正文文字，松手后点旁边冒出的「批注」；也可以把鼠标停在一段、一张表或一张图上，点「批注这一块」给整块加批注。', 'No annotations yet: switch to Reading view, select some text, then click the Annotate button that appears. Or hover a paragraph, table or image and click Annotate block to mark the whole block.'),
       });
       return;
     }
@@ -823,7 +858,12 @@ class OmnBrowserView extends ItemView {
     }
     top.createSpan({ cls: 'omn-bw-note', text: r.p.replace(/^.*\//, '').replace(/\.md$/, '') });
     top.createSpan({ cls: 'omn-bw-date', text: (a.created || '').slice(0, 10) });
-    item.createDiv({ cls: 'omn-bw-anchor', text: L('原文：', 'Original: ') + (a.anchor || '') });
+    item.createDiv({
+      cls: 'omn-bw-anchor',
+      text:
+        (a.kind === 'block' ? L('整块：', 'Block: ') : L('原文：', 'Original: ')) +
+        ((a.anchor || '').trim() || (a.kind === 'block' ? L('（这一块没有文字）', '(this block has no text)') : '')),
+    });
     // 面板条目和页边卡片渲染同一份 Markdown：链接能点、图片直接显示
     const body = item.createDiv({ cls: 'omn-bw-body omn-body' });
     MarkdownRenderer.render(this.app, a.note || '', body, r.p, this);
@@ -861,6 +901,7 @@ class OmnBrowserView extends ItemView {
       isNew: false,
       sourcePath: path,
       anchor: a.anchor,
+      isBlock: a.kind === 'block',
       category: a.category,
       note: a.note,
       categories: this.plugin.categoryList(a.category),
@@ -926,6 +967,21 @@ module.exports = class OwnMarginNotes extends Plugin {
         const view = this.previewView();
         if (!view) return false;
         if (!checking) this.addFromSelection(view);
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: 'omn-add-block',
+      name: L('为鼠标停着的那一块加批注', 'Annotate the block under the pointer'),
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!view || !view.file || !this.visibleSizer(view)) return false;
+        if (!checking) {
+          const b = this.blkTarget;
+          if (b && b.isConnected) this.addFromBlock(view, b);
+          else new Notice(L('先把鼠标停在正文的某一块上（一段、一张表、一张图都算一块）', 'Hover the pointer over a block of the text first — one paragraph, one table, one image each count'));
+        }
         return true;
       },
     });
@@ -1019,7 +1075,12 @@ module.exports = class OwnMarginNotes extends Plugin {
       if (this.selTimer) window.clearTimeout(this.selTimer);
       this.selTimer = window.setTimeout(() => this.onMouseUp(), 150);
     });
-    this.registerDomEvent(window, 'scroll', () => this.hideButton(), { capture: true, passive: true });
+    this.registerDomEvent(window, 'scroll', () => {
+      this.hideButton();
+      this.hideBlockBtn();
+    }, { capture: true, passive: true });
+    // 没选字、只是把鼠标停在正文某一块上，也冒一个「批注这一块」
+    this.registerDomEvent(document, 'mousemove', (e) => this.onBlockMove(e), { passive: true });
 
     // 上一个没被真正卸掉的实例如果还挂着总览面板，它会继续往 批注.json 写自己那份内存，
     // 和这个实例互相覆盖 —— 谁后写谁就把对方的批注抹掉了。加载时把它们卸干净。
@@ -1078,6 +1139,8 @@ module.exports = class OwnMarginNotes extends Plugin {
 
   showButton(rect, view) {
     this.btnView = view;
+    // 选字的「批注」和「批注这一块」同时只出现一个
+    this.hideBlockBtn();
     if (!this.btn || !this.btn.isConnected) {
       const btn = document.body.createDiv({ cls: 'omn-add-btn', text: L('批注', 'Annotate') });
       // 不让点按钮这一下把选区弄没了
@@ -1102,6 +1165,123 @@ module.exports = class OwnMarginNotes extends Plugin {
     }
   }
 
+  // 鼠标在阅读视图的正文上挪动时认「现在停在哪一块」。mousemove 每一下都量矩形是会触发重排的，
+  // 所以攒 90ms 做一次：手停下来那一下一定会算到。
+  onBlockMove(e) {
+    if (this.unloaded) return;
+    this.hoverEvt = e;
+    if (this.hoverTimer) return;
+    this.hoverTimer = window.setTimeout(() => {
+      this.hoverTimer = 0;
+      const ev = this.hoverEvt;
+      this.hoverEvt = null;
+      this.onBlockHover(ev);
+    }, 90);
+  }
+
+  onBlockHover(e) {
+    const t = e && e.target;
+    if (this.unloaded || !t || !t.closest) return;
+    if (document.querySelector('.modal-container')) {
+      this.hideBlockBtn();
+      return;
+    }
+    // 鼠标已经挪到按钮身上了：这时候最不能拆它。以前这里直接收手，结果就是
+    // 「一往按钮挪它就没」，半秒也点不着
+    if (t.closest('.omn-add-btn')) {
+      this.cancelBlockHide();
+      return;
+    }
+    if (t.closest('.omn-layer')) {
+      // 卡片压在按钮旁边时，去点按钮的路上会先擦过卡片；这里也不能立刻收手
+      this.scheduleBlockHide();
+      return;
+    }
+    // 正选着字的时候旁边已经有「批注」了，不要两个一起冒出来
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) {
+      this.hideBlockBtn();
+      return;
+    }
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const sizer = view && view.file ? this.visibleSizer(view) : null;
+    const block = sizer && t !== sizer && sizer.contains(t) ? blockOf(t, sizer) : null;
+    if (!block) {
+      this.scheduleBlockHide();
+      return;
+    }
+    this.showBlockButton(block, view);
+  }
+
+  // 从块上挪向按钮要穿过中间那几像素，那几步的 target 已经不是这一块了。
+  // 立刻收手就永远点不着，所以缓一下；这期间鼠标真进了按钮，这个定时器会被取消。
+  cancelBlockHide() {
+    if (this.blkHideTimer) {
+      window.clearTimeout(this.blkHideTimer);
+      this.blkHideTimer = 0;
+    }
+  }
+
+  scheduleBlockHide() {
+    this.cancelBlockHide();
+    this.blkHideTimer = window.setTimeout(() => {
+      this.blkHideTimer = 0;
+      this.hideBlockBtn();
+    }, 520);
+  }
+
+  showBlockButton(block, view) {
+    this.cancelBlockHide();
+    this.blkView = view;
+    this.blkTarget = block;
+    const r = block.getBoundingClientRect();
+    // 这一块已经滚出屏幕了：等鼠标挪回看得见的地方再说
+    if (!r.height || r.bottom < 44 || r.top > window.innerHeight - 12) {
+      this.hideBlockBtn();
+      return;
+    }
+    if (!this.blkBtn || !this.blkBtn.isConnected) {
+      const btn = document.body.createDiv({ cls: 'omn-add-btn', text: L('批注这一块', 'Annotate block') });
+      btn.addEventListener('mousedown', (e) => e.preventDefault());
+      btn.addEventListener('mouseenter', () => this.cancelBlockHide());
+      btn.addEventListener('mouseleave', () => this.scheduleBlockHide());
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const target = this.blkView;
+        const b = this.blkTarget;
+        this.hideBlockBtn();
+        if (target && target.file) this.addFromBlock(target, b);
+      });
+      this.blkBtn = btn;
+    }
+    this.blkBtn.style.left = Math.min(r.right + 6, window.innerWidth - 120) + 'px';
+    this.blkBtn.style.top = Math.min(Math.max(r.top, 44), window.innerHeight - 40) + 'px';
+    this.showHoverBox(r);
+  }
+
+  // 停住的这一块套一圈虚线，让他看清「一块」到底框住了多大范围
+  showHoverBox(r) {
+    if (!this.hoverBox) this.hoverBox = document.body.createDiv({ cls: 'omn-blk-hover' });
+    this.hoverBox.style.left = r.left - 5 + 'px';
+    this.hoverBox.style.top = r.top - 3 + 'px';
+    this.hoverBox.style.width = r.width + 10 + 'px';
+    this.hoverBox.style.height = r.height + 6 + 'px';
+  }
+
+  hideBlockBtn() {
+    this.cancelBlockHide();
+    if (this.blkBtn) {
+      this.blkBtn.remove();
+      this.blkBtn = null;
+    }
+    if (this.hoverBox) {
+      this.hoverBox.remove();
+      this.hoverBox = null;
+    }
+    this.blkTarget = null;
+  }
+
   onunload() {
     // 先立牌子：下面 detachLeavesOfType 会触发 layout-change，观察器/事件在 onunload 返回后才解绑，
     // 那一发 scheduleRender 会排在卸载之后跑，把动态 style 又建回来、往已卸载的实例上重画
@@ -1109,6 +1289,7 @@ module.exports = class OwnMarginNotes extends Plugin {
     if (this.timer) window.clearTimeout(this.timer);
     if (this.selTimer) window.clearTimeout(this.selTimer);
     if (this.anchorTimer) window.clearTimeout(this.anchorTimer);
+    if (this.hoverTimer) window.clearTimeout(this.hoverTimer);
     // 设置的写盘是延后的，卸载前补一次，别把最后那一下调整弄丢了
     if (this.setTimer) {
       window.clearTimeout(this.setTimer);
@@ -1117,6 +1298,7 @@ module.exports = class OwnMarginNotes extends Plugin {
     }
     if (this.observer) this.observer.disconnect();
     this.hideButton();
+    this.hideBlockBtn();
     this.cleanupAll();
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
     const dyn = document.getElementById('omn-dyn');
@@ -1274,10 +1456,11 @@ module.exports = class OwnMarginNotes extends Plugin {
       }
 
       const layer = this.layerFor(root, sizer);
-      const locs = items.map((a) => this.locate(sizer, a.anchor, a.occ));
+      const locs = items.map((a) => this.locateAny(sizer, a));
       // 打开一篇笔记会连着触发好几次渲染，每次都推倒重建卡片就是一闪一闪；签名没变就只重算位置。
       // 签名里带上每条批注落在正文第几块：原文被改掉、卡片该跟着消失时，签名就变了
-      // 展示方式和高亮开关也要进签名：浮签方式即使关了高亮也必须画出色块，否则鼠标没地方停
+      // 展示方式和高亮开关也要进签名：浮签方式即使关了高亮也必须画出色块，否则鼠标没地方停；
+      // 整块标记同理 —— 色带和淡底量的是不同的矩形，不换签名就不会重画
       const kids = Array.from(sizer.children);
       // 整份签名当作 JSON.stringify 的「第一个参数」传：写成两个参数，第二个会被当成
       // replacer（字段白名单），批注内容全被过滤掉，签名永远只剩 ["margin",true] ——
@@ -1285,7 +1468,8 @@ module.exports = class OwnMarginNotes extends Plugin {
       const sig = JSON.stringify([
         this.settings.displayMode,
         this.settings.highlight,
-        items.map((a, i) => [a.id, a.anchor, a.category, a.note, a.occ || 0, kids.indexOf(locs[i] ? locs[i].el : null)]),
+        this.settings.blockMark,
+        items.map((a, i) => [a.id, a.anchor, a.span || 0, a.category, a.note, a.occ || 0, a.kind === 'block' ? a.idx : '', kids.indexOf(locs[i] ? locs[i].el : null)]),
       ]);
       if (layer.omnSig === sig && layer.omnPlaced && layer.omnPlaced.length) {
         // 正文被 Obsidian 重排过（改窗口宽度、滚动懒渲染）时块元素会换成新的一批，
@@ -1315,8 +1499,12 @@ module.exports = class OwnMarginNotes extends Plugin {
         card.dataset.omnId = a.id;
         card.createDiv({ cls: 'omn-cat', text: a.category || '批注' });
         // 卡片里先复述一遍被批注的原文，光靠短线看不出指的是哪句
-        const quoted = (a.anchor || '').replace(/\s+/g, ' ').trim();
-        const q = card.createDiv({ cls: 'omn-quote', text: quoted.length > 44 ? quoted.slice(0, 44) + '…' : quoted });
+        const isBlk = a.kind === 'block';
+        let quoted = (a.anchor || '').replace(/\s+/g, ' ').trim();
+        // 纯图那种没字的块 anchor 是空的，卡片上总得说一句它指的是哪一块
+        if (!quoted && isBlk) quoted = L('这一块没有文字', 'this block has no text');
+        const shown = (isBlk ? L('整块：', 'Block: ') : '') + quoted;
+        const q = card.createDiv({ cls: 'omn-quote', text: shown.length > 48 ? shown.slice(0, 48) + '…' : shown });
         q.title = quoted;
         const body = card.createDiv({ cls: 'omn-body' });
         // 运行时的参数顺序是 (app, markdown, el, sourcePath, component)，和官方文档写的顺序相反
@@ -1330,7 +1518,7 @@ module.exports = class OwnMarginNotes extends Plugin {
         // 浮签模式下色块就是触发器，高亮开关被忽略也要画
         const hl = this.settings.highlight || bubble ? layer.createDiv({ cls: 'omn-hl ' + this.catCls(a.category) }) : null;
         if (hl) hl.dataset.omnId = a.id;
-        placed.push({ a, idx: i, card, hl, block, occInBlock: loc.occ });
+        placed.push({ a, idx: i, card, hl, block, occInBlock: loc.occ, blk: isBlk });
       });
 
       layer.omnPlaced = placed;
@@ -1453,13 +1641,15 @@ module.exports = class OwnMarginNotes extends Plugin {
   // TreeWalker + 逐字规范化，就是点批注时那一下卡顿。缓存存的是「相对本块」的偏移，
   // 所以图片晚加载、正文上下挪位也不会错位。
   lineRects(it) {
+    // 整块批注：标记就是这一块本身，一次 getBoundingClientRect 而已，不必修缓存
+    if (it.blk) return [this.blockMarkRect(it)];
     const br = it.block.getBoundingClientRect();
     const c = it.rectCache;
     // 键用块自己的宽度：页边的正文列宽是插件按面板现算的，会随窗口变，
     // 拿覆盖层宽度当键就漏掉了「列宽变了、行数跟着变了」这一种，高亮会停在旧行上
     const key = Math.round(br.width);
     if (!c || c.block !== it.block || c.w !== key || !br.height) {
-      const list = this.anchorRects(it.block, it.a.anchor, it.occInBlock);
+      const list = this.anchorRects(it.block, it.a.anchor, it.occInBlock, it.a.span);
       if (!list || !br.height) return [br];
       it.rectCache = {
         block: it.block,
@@ -1470,6 +1660,20 @@ module.exports = class OwnMarginNotes extends Plugin {
     return it.rectCache.lines.map((l) => ({ left: br.left + l.x, top: br.top + l.y, width: l.width, height: l.height }));
   }
 
+  // 整块标记占的矩形（和 lineRects 同一口径的视口坐标）。
+  // 色带看着只有一条 3px 的竖条，但外框给到 16px 宽 —— 浮签模式下鼠标得有地方停下来。
+  blockMarkRect(it) {
+    const r = it.block.getBoundingClientRect();
+    // 正文顶到屏幕左边时（窄栏、或 --file-margins 被改成 0），往外让的标记会被屏幕切掉，
+    // 既看不见也停不住鼠标 —— 收进屏幕内，淡底的右边跟着对齐
+    const on = (v) => Math.max(0, v);
+    if (this.settings.blockMark === 'tint') {
+      const left = on(r.left - 6);
+      return { left, top: r.top - 3, width: r.right + 6 - left, height: r.height + 6 };
+    }
+    return { left: on(r.left - 14), top: r.top + 2, width: 16, height: Math.max(14, r.height - 4) };
+  }
+
   // 高亮色块：有几行摆几个，节点能复用就不重建（滚动时反复 empty/create 也是一笔开销）
   markLines(it, lr) {
     const rects = this.lineRects(it);
@@ -1477,7 +1681,7 @@ module.exports = class OwnMarginNotes extends Plugin {
       const kids = it.hl.children;
       while (kids.length > rects.length) it.hl.removeChild(kids[kids.length - 1]);
       while (kids.length < rects.length) {
-        const d = it.hl.createDiv({ cls: 'omn-hl-line' });
+        const d = it.hl.createDiv({ cls: 'omn-hl-line' + (it.blk ? ' omn-block' : '') });
         d.dataset.omnId = it.a.id;
       }
       for (let n = 0; n < rects.length; n++) {
@@ -1493,7 +1697,9 @@ module.exports = class OwnMarginNotes extends Plugin {
   }
 
   // 只量矩形，不改正文：把 anchor 在块里的文本范围找出来，返回它每一行的位置
-  anchorRects(block, anchor, occ) {
+  // span = 当初整段选区的字数。anchor 只存前 240 字（截短了才耐得住正文改动），
+  // 所以整段高亮要靠 span 往后延伸；老批注没这个数，就按 anchor 本身画
+  anchorRects(block, anchor, occ, span) {
     const target = norm(anchor || '').text;
     if (!target) return null;
     const parts = [];
@@ -1515,7 +1721,7 @@ module.exports = class OwnMarginNotes extends Plugin {
     for (let k = 0; idx !== -1 && k < (occ || 0); k++) idx = joined.indexOf(target, idx + target.length);
     if (idx === -1) idx = joined.indexOf(target);
     if (idx === -1) return null;
-    const end = idx + target.length;
+    const end = Math.min(idx + Math.max(target.length, span || 0), joined.length);
     const hit = parts.filter((p) => p.from < end && p.to > idx);
     if (!hit.length) return null;
 
@@ -1566,6 +1772,38 @@ module.exports = class OwnMarginNotes extends Plugin {
       }
     }
     return null;
+  }
+
+  // 两种批注的定位入口：整块按「这块开头的字」认块，选字按整句认第几次出现
+  locateAny(sizer, a) {
+    return a.kind === 'block' ? this.locateBlock(sizer, a) : this.locate(sizer, a.anchor, a.occ);
+  }
+
+  // 整块批注靠 anchor 开头那二十几个字当指纹：正文里含这段文字的块都是候选，
+  // 再挑离当初记的块号最近的那一个 —— 上面插了一段或删了一段，块号整体挪了，
+  // 「就近」能把它带回原来那块；一个候选都没有才算挂不上
+  locateBlock(sizer, a) {
+    const list = this.blockTexts(sizer);
+    const fp = blockFp(a.anchor);
+    // 纯图那种没有字的块只能按块号记
+    if (!fp) return list[a.idx] ? { el: list[a.idx].el, occ: 0 } : null;
+    let hits = [];
+    list.forEach((b, i) => {
+      if (b.text.indexOf(fp) >= 0) hits.push(i);
+    });
+    if (!hits.length) {
+      const short = fp.slice(0, 10);
+      if (short.length >= 6) {
+        list.forEach((b, i) => {
+          if (b.text.indexOf(short) >= 0) hits.push(i);
+        });
+      }
+    }
+    if (!hits.length) return null;
+    const want = Number(a.idx) || 0;
+    let best = hits[0];
+    for (const i of hits) if (Math.abs(i - want) < Math.abs(best - want)) best = i;
+    return { el: list[best].el, occ: 0 };
   }
 
   findBlock(sizer, anchor, occ) {
@@ -1638,6 +1876,8 @@ module.exports = class OwnMarginNotes extends Plugin {
     const a = {
       id: newId(),
       anchor: text.slice(0, 240),
+      // 整段选区有多少个字（去掉空格换行后），高亮靠它铺满长段落
+      span: norm(text).text.length,
       // 这句在正文里是第几次出现，先在这一刻定死：不记的话重复句子一律挂到第一处
       occ: this.occOfSelection(sizer, sel),
       category: (this.settings.categories[0] || {}).name || '批注',
@@ -1667,11 +1907,53 @@ module.exports = class OwnMarginNotes extends Plugin {
     }).open();
   }
 
+  // 整块批注：anchor 记这块开头的字（给人看，也是找块的指纹），idx 记当时排在正文第几块
+  addFromBlock(view, block) {
+    const sizer = this.visibleSizer(view);
+    if (!sizer || !block || !block.isConnected || !sizer.contains(block)) {
+      new Notice(L('先把鼠标停在正文的某一块上（一段、一张表、一张图都算一块）', 'Hover the pointer over a block first — one paragraph, one table, one image each count'));
+      return;
+    }
+    const text = (block.textContent || '').replace(/\s+/g, ' ').trim();
+    const a = {
+      id: newId(),
+      kind: 'block',
+      anchor: text.slice(0, 60),
+      idx: this.blockTexts(sizer).findIndex((b) => b.el === block),
+      category: (this.settings.categories[0] || {}).name || '批注',
+      note: '',
+      created: new Date().toISOString(),
+    };
+    // 同 addFromSelection：弹窗开着的时候叶子可能换笔记，路径要在这一刻定死
+    const path = view.file.path;
+
+    new NoteModal(this.app, {
+      isNew: true,
+      sourcePath: path,
+      isBlock: true,
+      anchor: a.anchor,
+      category: a.category,
+      note: '',
+      categories: this.categoryList(),
+      onSave: async (vals) => {
+        a.category = vals.category;
+        a.note = vals.note;
+        await this.upsert(path, a);
+        this.renderPath(path);
+      },
+      onDelete: async () => {
+        await this.remove(path, a.id);
+        this.renderPath(path);
+      },
+    }).open();
+  }
+
   edit(a, path) {
     new NoteModal(this.app, {
       isNew: false,
       sourcePath: path,
       anchor: a.anchor,
+      isBlock: a.kind === 'block',
       category: a.category,
       note: a.note,
       categories: this.categoryList(a.category),
@@ -1719,9 +2001,15 @@ module.exports = class OwnMarginNotes extends Plugin {
 
   // 「这句原文还在不在」用源码来判断，别把「正文没画出来」说成「文字被改过了」
   async reportLost(hit) {
+    const blk = hit.a.kind === 'block';
     const info = await this.plainInfo(hit.p);
-    if (info && this.anchorInInfo(info, hit.a.anchor)) {
-      new Notice(L('这句原文还在笔记里，是正文没画出来：点一下笔记正文再试', 'The sentence is still in the note, the text just was not rendered: click into the note body and try again'));
+    const still = info === null ? false : blk ? await this.blockOk(hit.p, hit.a.anchor) : this.anchorInInfo(info, hit.a.anchor);
+    if (still) {
+      new Notice(
+        blk
+          ? L('这一块还在笔记里，是正文没画出来：点一下笔记正文再试', 'That block is still in the note, the text just was not rendered: click into the note body and try again')
+          : L('这句原文还在笔记里，是正文没画出来：点一下笔记正文再试', 'The sentence is still in the note, the text just was not rendered: click into the note body and try again'),
+      );
       return;
     }
     this.markLost(hit.a.id);
@@ -1729,7 +2017,11 @@ module.exports = class OwnMarginNotes extends Plugin {
       new Notice(L('这句是查询代码块渲染出来的，源码里没有这几个字，批注挂不上：右键这条，选「重新选原文」挑一句正文里手写的', 'This sentence was rendered by a query block, so those words are not in the source and nothing can attach: right-click the entry, choose Re-pick the text, then pick a sentence you typed yourself'));
       return;
     }
-    new Notice(L('这句原文在笔记里已经找不到了：在面板里右键这条，选「重新选原文」', 'The original sentence is no longer in the note: right-click the entry in the panel and choose Re-pick the text'));
+    new Notice(
+      blk
+        ? L('这一块在笔记里已经找不到了：在面板里右键这条，选「重新选原文」挂回新的那一段', 'That block is no longer in the note: right-click the entry in the panel and choose Re-pick the text to attach it to the new wording')
+        : L('这句原文在笔记里已经找不到了：在面板里右键这条，选「重新选原文」', 'The original sentence is no longer in the note: right-click the entry in the panel and choose Re-pick the text'),
+    );
   }
 
   // 笔记源码折成「屏幕上能看到的那些字」，按 mtime+size 缓存；文件一改自然作废。
@@ -1777,6 +2069,22 @@ module.exports = class OwnMarginNotes extends Plugin {
     return this.anchorInInfo(info, anchor);
   }
 
+  // 「这一块还在不在」也用源码判断。源码折出来的字和渲染并不完全对得上：
+  // 表格中间那道 |---|---| 会变成一串短横，插在表头和第一行数据之间。
+  // 所以整串对不上就一级一级缩短，宁可漏报也别把好好的批注说成丢了。
+  async blockOk(path, anchor) {
+    const fp = blockFp(anchor);
+    if (fp.length < 8) return true; // 没字的块（纯图）对不了，不算丢
+    const info = await this.plainInfo(path);
+    if (!info) return false;
+    const lens = [fp.length, 14, 8];
+    for (let i = 0; i < lens.length; i++) {
+      if (lens[i] < 8) break;
+      if (info.text.indexOf(fp.slice(0, lens[i])) >= 0) return true;
+    }
+    return false;
+  }
+
   scheduleAnchorCheck() {
     if (this.unloaded) return;
     if (this.anchorTimer) window.clearTimeout(this.anchorTimer);
@@ -1793,7 +2101,9 @@ module.exports = class OwnMarginNotes extends Plugin {
     const ids = [];
     for (const p of Object.keys(this.data || {})) {
       for (const a of this.data[p] || []) {
-        if (!(await this.anchorOk(p, a.anchor))) ids.push(a.id);
+        // 整块批注对的是块开头的指纹，选字批注对的是一整句原文
+        const ok = a.kind === 'block' ? await this.blockOk(p, a.anchor) : await this.anchorOk(p, a.anchor);
+        if (!ok) ids.push(a.id);
       }
     }
     if (mine !== this.checkSeq) return;
@@ -1875,9 +2185,9 @@ module.exports = class OwnMarginNotes extends Plugin {
       const hit = this.findById(id);
       // 找块要用正文容器（sizer），页边覆盖层里没有正文
       const sizer = root && root.querySelector('.markdown-preview-sizer');
-      const loc = hit && sizer ? this.locate(sizer, hit.a.anchor, hit.a.occ) : null;
+      const loc = hit && sizer ? this.locateAny(sizer, hit.a) : null;
       if (!loc) return;
-      it = { a: hit.a, block: loc.el, occInBlock: loc.occ };
+      it = { a: hit.a, block: loc.el, occInBlock: loc.occ, blk: hit.a.kind === 'block' };
     }
 
     const fl = root.createDiv({ cls: 'omn-flashlayer' });
@@ -1887,7 +2197,9 @@ module.exports = class OwnMarginNotes extends Plugin {
     fl.style.width = anchor.offsetWidth + 'px';
     fl.style.height = anchor.offsetHeight + 'px';
     const fr = fl.getBoundingClientRect();
-    this.lineRects(it).forEach((r) => {
+    // 整块批注闪整块（标记本身可能只有一条 3px 的色带，闪它看不清）
+    const rects = it.blk ? [it.block.getBoundingClientRect()] : this.lineRects(it);
+    rects.forEach((r) => {
       const d = fl.createDiv({ cls: 'omn-flash ' + this.catCls(it.a.category) });
       d.style.left = r.left - fr.left + 'px';
       d.style.top = r.top - fr.top + 'px';
@@ -2075,11 +2387,13 @@ module.exports = class OwnMarginNotes extends Plugin {
       const list = byCat.get(k).slice().sort((a, b) => a.p.localeCompare(b.p, 'zh') || String(a.a.created || '').localeCompare(String(b.a.created || '')));
       out += '# ' + title(i) + k + L('（', ' (') + list.length + L(' 条）\n\n', list.length === 1 ? ' item)\n\n' : ' items)\n\n');
       list.forEach((r) => {
-        const anchor = (r.a.anchor || '').replace(/\s+/g, ' ').trim();
+        const anchor =
+          (r.a.anchor || '').replace(/\s+/g, ' ').trim() ||
+          (r.a.kind === 'block' ? L('（这一块没有文字）', '(this block has no text)') : '');
         const noteName = r.p.replace(/^.*\//, '').replace(/\.md$/, '');
         // 标题是「哪篇笔记」，原文另起一行引用，别把同一句话写两遍
         out += '## ' + noteName + '\n\n';
-        out += L('> 原文：', '> Original: ') + anchor + '\n\n';
+        out += L(r.a.kind === 'block' ? '> 整块原文：' : '> 原文：', r.a.kind === 'block' ? '> Original (whole block): ' : '> Original: ') + anchor + '\n\n';
         out += ((r.a.note || '').trim() || L('（这条没写内容）', '(no text in this annotation)')) + '\n\n';
         out += '*' + this.stamp(r.a.created) + ' · [[' + noteName + ']]*\n\n';
       });
@@ -2142,9 +2456,11 @@ module.exports = class OwnMarginNotes extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
     if (!Array.isArray(this.settings.categories) || !this.settings.categories.length) {
       this.settings.categories = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.categories));
-    }    // 样式值将来可能改名或删掉，认不出来就落回默认那套，别让覆盖层光着
+    }
+    // 样式值将来可能改名或删掉，认不出来就落回默认那套，别让覆盖层光着
     const known = (v, pairs, dft) => (pairs.some(([k]) => k === v) ? v : dft);
     this.settings.markStyle = known(this.settings.markStyle, MARK_STYLES, DEFAULT_SETTINGS.markStyle);
+    this.settings.blockMark = known(this.settings.blockMark, BLOCK_MARKS, DEFAULT_SETTINGS.blockMark);
     this.settings.cardStyle = known(this.settings.cardStyle, CARD_STYLES, DEFAULT_SETTINGS.cardStyle);
     this.settings.leader = known(this.settings.leader, LEADERS, DEFAULT_SETTINGS.leader);
     this.settings.marginSide = known(this.settings.marginSide, SIDES, DEFAULT_SETTINGS.marginSide);
@@ -2233,9 +2549,10 @@ module.exports = class OwnMarginNotes extends Plugin {
     root.classList.toggle('omn-bubble', bubble);
   }
 
-  // 原文标记 / 卡片皮肤两个开关落在覆盖层上，正文高亮和卡片各自认领
+  // 原文标记 / 整块标记 / 卡片皮肤三个开关落在覆盖层上，正文高亮、块标记和卡片各自认领
   tagLayer(layer) {
     MARK_STYLES.forEach(([k]) => layer.classList.toggle('omn-mk-' + k, k === this.settings.markStyle));
+    BLOCK_MARKS.forEach(([k]) => layer.classList.toggle('omn-bm-' + k, k === this.settings.blockMark));
     this.tagSkin(layer);
   }
 

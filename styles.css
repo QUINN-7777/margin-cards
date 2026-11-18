@@ -258,6 +258,34 @@
   7%, 45%, 82% { background-color: rgba(255, 212, 60, 0.55); }
 }
 
+/* 三.3、整块批注的标记：批的是「一块」—— 一段、一张表、一张图、一个标题都算一块。
+   痕迹照样画在覆盖层里，正文一个节点都不动；块开头的字当指纹，块号当就近线索，
+   上面插一段删一段也认得回来（设置里「整块标记」选色带还是淡底）。 */
+.omn-hl > .omn-hl-line.omn-block { border-bottom: none; background: transparent; }
+/* 左侧色带：JS 给的框有 16px 宽（浮签模式下鼠标得有地方停），看得见的只有左边那 3px */
+.markdown-preview-view .omn-layer.omn-bm-band > .omn-hl > .omn-hl-line.omn-block {
+  background: linear-gradient(to right, var(--omn-accent) 0 3px, transparent 3px);
+  opacity: 0.9;
+}
+/* 整块淡底：整块铺一层分类色的浅底，左边压一条实线 */
+.markdown-preview-view .omn-layer.omn-bm-tint > .omn-hl > .omn-hl-line.omn-block {
+  background: var(--omn-hl);
+  border-left: 3px solid var(--omn-accent);
+  border-radius: 5px;
+}
+/* 浮签模式：块标记就是气泡的触发器，得接得住鼠标；停住的那一块再加点重量 */
+.markdown-preview-view.omn-active.omn-bubble .omn-layer > .omn-hl > .omn-hl-line.omn-block {
+  pointer-events: auto;
+  cursor: help;
+}
+.markdown-preview-view.omn-active.omn-bubble .omn-hl.omn-hl-on > .omn-hl-line.omn-block {
+  background: var(--omn-hl-strong);
+  border-radius: 4px;
+}
+.omn-layer.omn-bm-band .omn-hl.omn-hl-on > .omn-hl-line.omn-block {
+  background: linear-gradient(to right, var(--omn-accent) 0 6px, transparent 6px);
+}
+
 /* 四、分类配色（同名分类永远同色，插件按分类名取模） */
 .omn-c0 { --omn-accent: #495057; --omn-hl: rgba(73, 80, 87, 0.10); --omn-hl-strong: rgba(73, 80, 87, 0.30); --omn-fill: rgba(73, 80, 87, 0.18); }
 .omn-c1 { --omn-accent: #d1493f; --omn-hl: rgba(209, 73, 63, 0.13); --omn-hl-strong: rgba(209, 73, 63, 0.30); --omn-fill: rgba(209, 73, 63, 0.18); }
@@ -283,11 +311,11 @@
 /* 涟漪：正文一点不上色，只在字形底下画一条分类色的波浪线（Word 校对那条的样子）。
    波浪用一段 inline SVG 当 mask，线的颜色由 background-color 走 var(--omn-accent)，
    所以每个分类还是自己的颜色；SVG 里的 w3.org 只是命名空间声明，不会联网取东西。 */
-.markdown-preview-view.omn-active .omn-layer.omn-mk-marker .omn-hl-line {
+.markdown-preview-view.omn-active .omn-layer.omn-mk-marker .omn-hl-line:not(.omn-block) {
   background: transparent;
   border-bottom: none;
 }
-.markdown-preview-view.omn-active .omn-layer.omn-mk-marker .omn-hl-line::after {
+.markdown-preview-view.omn-active .omn-layer.omn-mk-marker .omn-hl-line:not(.omn-block)::after {
   content: '';
   position: absolute;
   left: 0;
@@ -305,17 +333,17 @@
 }
 
 /* Word 审阅：只留一条虚线下划线，正文完全不上色 */
-.markdown-preview-view.omn-active .omn-layer.omn-mk-dash .omn-hl-line {
+.markdown-preview-view.omn-active .omn-layer.omn-mk-dash .omn-hl-line:not(.omn-block) {
   background: transparent;
   border-bottom: 1px dashed var(--omn-accent);
 }
 
 /* 胶囊：比文字宽出一点点的圆药丸，边框走分类色 */
-.markdown-preview-view.omn-active .omn-layer.omn-mk-pill .omn-hl-line {
+.markdown-preview-view.omn-active .omn-layer.omn-mk-pill .omn-hl-line:not(.omn-block) {
   background: transparent;
   border-bottom: none;
 }
-.markdown-preview-view.omn-active .omn-layer.omn-mk-pill .omn-hl-line::after {
+.markdown-preview-view.omn-active .omn-layer.omn-mk-pill .omn-hl-line:not(.omn-block)::after {
   content: '';
   position: absolute;
   inset: -2px -5px;
@@ -325,11 +353,11 @@
 }
 
 /* 马克笔：笔下沿一道粗色带，带一点斜切 */
-.markdown-preview-view.omn-active .omn-layer.omn-mk-brush .omn-hl-line {
+.markdown-preview-view.omn-active .omn-layer.omn-mk-brush .omn-hl-line:not(.omn-block) {
   background: transparent;
   border-bottom: none;
 }
-.markdown-preview-view.omn-active .omn-layer.omn-mk-brush .omn-hl-line::after {
+.markdown-preview-view.omn-active .omn-layer.omn-mk-brush .omn-hl-line:not(.omn-block)::after {
   content: '';
   position: absolute;
   left: -2px;
@@ -494,6 +522,16 @@
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 .omn-add-btn:hover { background: var(--interactive-accent); color: var(--text-on-accent); }
+
+/* 七.1、鼠标停在正文某一块上时的那圈虚线：只在他眼前画，不落进正文，也不拦点击 */
+.omn-blk-hover {
+  position: fixed;
+  z-index: 998;
+  pointer-events: none;
+  border: 1px dashed var(--interactive-accent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--interactive-accent) 7%, transparent);
+}
 
 /* 八、丝带按钮打开的批注面板（右侧栏） */
 .omn-bw {
